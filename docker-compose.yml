@@ -1,0 +1,11 @@
+version: '3.7'
+
+services:
+  pbi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    #    command: tail -f /dev/null
+    image: konstantinschulz/political-bias-identification:v1
+    ports:
+      - "8000:8000"

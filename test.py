@@ -1,56 +1,58 @@
-from transformers import BertTokenizer, BertForSequenceClassification
-from nlp import load_dataset
-from sklearn.metrics import accuracy_score, f1_score, classification_report
-import torch
-import argparse
-import os
+from typing import Any
 
-# Construct the argument parser
-ap = argparse.ArgumentParser()
+from config import Config
+import time
+import docker
+from docker.models.containers import Container
+from elg.model.response.ClassificationResponse import ClassificationResponse, ClassesResponse
+from elg.service import Service
+from elg.model import TextRequest
+import unittest
 
-# Add the arguments to the parser
-ap.add_argument("-data_folder", "--data_folder", required=True,
-   help="Path to the dataset")
-ap.add_argument("-model_folder", "--model_folder", required=True,
-   help="Path to the model")
-
-args = vars(ap.parse_args())
+from elg_service import PoliticalBiasService
 
 
-DATA_FOLDER = args['data_folder']
-MODEL_FOLDER = args['model_folder']
-#Load dataset
-#dataset = load_dataset(os.path.join(DATA_FOLDER, 'de_politik_news.py'), cache_dir=os.path.join(DATA_FOLDER, '.de-politic-news'))
-dataset = load_dataset('de_politik_news.py', cache_dir=DATA_FOLDER)
-#Tokenize test dataset
-tokenizer = BertTokenizer.from_pretrained('bert-base-german-cased')
-encoded_test = dataset['test'].map(lambda examples: tokenizer(examples['text'], padding='max_length', truncation=True), batched=True)
+class ElgTestCase(unittest.TestCase):
+    class_field: str = "far-right"
+    content: str = "Mit Verlaub, Herr Bundespräsident, Sie leben im Schloss Bellevue in einer Blase, in einem Raumschiff. Dürfen wir etwas nachhelfen?"
+    score: float = 0.2565845710503715
 
-#Process labels
-label_dict = {'far-left':0, 'center-left':1, 'center':2, 'center-right':3, 'far-right':4}
-encoded_test = encoded_test.map(lambda examples: {'labels': label_dict[examples['class']]})
+    def test_local(self):
+        request = TextRequest(content=ElgTestCase.content)
+        service = PoliticalBiasService(Config.LANGUAGE_SERVICE)
+        response = service.process_text(request)
+        max_cr: ClassesResponse = max(response.classes, key=lambda x: x.score)
+        self.assertEqual(max_cr.class_field, ElgTestCase.class_field)
+        self.assertEqual(max_cr.score, ElgTestCase.score)
+        self.assertEqual(type(response), ClassificationResponse)
 
-class_test = encoded_test['labels']
-encoded_test.set_format(type='torch', columns=['input_ids', 'token_type_ids', 'attention_mask'])#, 'labels'])
+    def test_docker(self):
+        client = docker.from_env()
+        ports_dict: dict = dict()
+        ports_dict[Config.DOCKER_PORT_CREDIBILITY] = Config.HOST_PORT_CREDIBILITY
+        container: Container = client.containers.run(
+            Config.DOCKER_IMAGE_LANGUAGE_SERVICE, ports=ports_dict, detach=True)
+        # wait for the container to start the API
+        time.sleep(1)
+        service: Service = Service.from_docker_image(
+            Config.DOCKER_IMAGE_LANGUAGE_SERVICE,
+            f"http://localhost:{Config.DOCKER_PORT_CREDIBILITY}/process", Config.HOST_PORT_CREDIBILITY)
+        response: Any = service(ElgTestCase.content, sync_mode=True)
+        container.stop()
+        container.remove()
+        max_cr: ClassesResponse = max(response.classes, key=lambda x: x.score)
+        self.assertEqual(max_cr.class_field, ElgTestCase.class_field)
+        self.assertEqual(max_cr.score, ElgTestCase.score)
+        self.assertEqual(type(response), ClassificationResponse)
 
-#Initialize model
-model = BertForSequenceClassification.from_pretrained(MODEL_FOLDER, num_labels=5)
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model.to(device)
+    def test_elg_remote(self):
+        service = Service.from_id(7484)
+        response: Any = service(ElgTestCase.content)
+        max_cr: ClassesResponse = max(response.classes, key=lambda x: x.score)
+        self.assertEqual(max_cr.class_field, ElgTestCase.class_field)
+        self.assertEqual(max_cr.score, ElgTestCase.score)
+        self.assertEqual(type(response), ClassificationResponse)
 
-#Predict labels
-model_test = []
-for i in range(len(encoded_test)):
-	prediction = model(**{k: v.unsqueeze(0).to(device) for k, v in encoded_test[i].items()})
-	predicted = torch.argmax(prediction[0], dim=1).item()
-	model_test.append(predicted)
 
-#Calculate accuracy
-accuracy = accuracy_score(class_test, model_test)
-f1_micro = f1_score(class_test, model_test, average = 'micro')
-f1_macro = f1_score(class_test, model_test, average = 'macro')
-report = classification_report(class_test, model_test)
-print(f'accuracy: {accuracy}')
-print(f'F1-micro: {f1_micro}')
-print(f'F1-macro: {f1_macro}')
-print(f'Report: {report}')
+if __name__ == '__main__':
+    unittest.main()
