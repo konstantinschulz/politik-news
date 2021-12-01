@@ -16,4 +16,3 @@ class Config:
     TFIDF_DIR: str = os.path.join(MODELS_DIR, "TFIDF")
     TFIDF_MODEL: RandomForestClassifier = pickle.load(open(os.path.join(TFIDF_DIR, "model.bin"), 'rb'))
     TFIDF_VECTORIZER = pickle.load(open(os.path.join(TFIDF_DIR, "vectorizer.bin"), 'rb'))
-    TOKENIZER:

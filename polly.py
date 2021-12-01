@@ -26,18 +26,8 @@ class BiasDataset(Dataset):
             for i, line in enumerate(f.readlines()):
                 if i == idx:
                     bi: BiasItem = BiasItem.from_json(json_dict=json.loads(line))
-                    encodings: BatchEncoding = Config.tokenizer(
-                        bi.text, truncation=True, padding="max_length", max_length=Config.max_length,
-                        return_tensors=TensorType.PYTORCH)
-                    for k, v in encodings.items():
-                        encodings[k] = v.squeeze().to(Config.device)
-                    target: torch.Tensor = torch.zeros(2, device=Config.device)
-                    target[di.label] = 1
-                    encodings["labels"] = target
-                    # adapt CFC scores to our policy of 1 = credible, 0 = fake
-                    encodings["cfc"] = torch.tensor(1 - di.cfc, device=Config.device)
-                    encodings["alpaca"] = torch.tensor(list(di.alpaca.values()), device=Config.device)
-                    encodings["cs"] = torch.tensor(list(di.cs.values()), device=Config.device)
+                    encodings: BatchEncoding
+                    # TODO: tokenize text, add label
                     return encodings
 
 
